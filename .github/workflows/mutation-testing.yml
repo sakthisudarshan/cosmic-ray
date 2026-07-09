@@ -49,6 +49,7 @@ jobs:
           path: |
             reports/metrics-report.json
             reports/metrics-report.md
+            reports/mutation-score-gate.json
           retention-days: 30
 
       - name: Print summary
