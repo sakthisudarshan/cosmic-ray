@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+dist/
+build/
+.venv/
+venv/
+.env
+
+# Cosmic Ray
+session.sqlite
+*.sqlite
+
+# Reports (generated artifacts; JSON/MD are uploaded in CI)
+reports/
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+Thumbs.db
+.DS_Store
+
+# Coverage
+.coverage
+htmlcov/
+.pytest_cache/
