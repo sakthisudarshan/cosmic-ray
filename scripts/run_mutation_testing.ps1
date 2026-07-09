@@ -20,8 +20,12 @@ cosmic-ray init cosmic-ray.toml session.sqlite
 Write-Host "==> Executing mutations (this may take several minutes)"
 cosmic-ray exec cosmic-ray.toml session.sqlite
 
+Write-Host "==> Exporting dump and TESTABLE platform JSON"
+New-Item -ItemType Directory -Force -Path cosmic-ray/0 | Out-Null
+cosmic-ray dump session.sqlite > cosmic-ray/0/cosmic_ray_dump.jsonl
+
 Write-Host "==> Generating TESTABLE metrics report"
-python scripts/metrics_reporter.py --session session.sqlite --fail-on-gate
+python scripts/export_testable_cosmic_ray.py --fail-on-gate
 
 Write-Host "==> Cosmic Ray summary"
 cr-rate session.sqlite

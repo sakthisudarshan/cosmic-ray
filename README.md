@@ -57,8 +57,18 @@ cr-report session.sqlite --surviving-only
 
 After a run, reports are written to:
 
-- `reports/metrics-report.json` — machine-readable metrics for CI/integration
-- `reports/metrics-report.md` — human-readable summary with gate pass/fail
+- `cosmic-ray/0/cosmic_ray.json` — **TESTABLE platform file** (embeds 0–100 metrics; this is what the taxonomy gate reads)
+- `reports/mutation-score-gate.json` — dashboard gate summary
+- `reports/metrics-report.json` — full metrics detail
+- `reports/metrics-report.md` — human-readable summary
+
+**Important:** The TESTABLE taxonomy gate reads `cosmic-ray/0/cosmic_ray.json`. After cosmic-ray runs, always execute:
+
+```powershell
+python scripts/export_testable_cosmic_ray.py
+```
+
+This embeds `LogicErrorSensitivity`, `MutationKillRatePercent`, and all 7 classification scores on a **0–100 scale**. Without this step, the gate shows **1/100 FAIL** even when mutation testing succeeded.
 
 ## Project Layout
 

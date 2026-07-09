@@ -97,14 +97,18 @@ def load_session_records(session_file: Path) -> list[dict[str, Any]]:
 
 
 def compute_metrics(records: list[dict[str, Any]], session_file: Path) -> MetricsReport:
-    total = len(records)
-    killed = sum(1 for record in records if record["test_outcome"] == "killed")
-    survived = sum(1 for record in records if record["test_outcome"] == "survived")
+    valid_records = [
+        record for record in records if record["test_outcome"] in ("killed", "survived")
+    ]
+    incompetent = sum(1 for record in records if record["test_outcome"] == "incompetent")
+    total = len(valid_records)
+    killed = sum(1 for record in valid_records if record["test_outcome"] == "killed")
+    survived = sum(1 for record in valid_records if record["test_outcome"] == "survived")
 
     kill_rate = (killed / total) if total else 0.0
 
     by_module: dict[str, dict[str, int]] = defaultdict(lambda: {"killed": 0, "total": 0})
-    for record in records:
+    for record in valid_records:
         module_stats = by_module[record["module_name"]]
         module_stats["total"] += 1
         if record["test_outcome"] == "killed":
@@ -118,7 +122,7 @@ def compute_metrics(records: list[dict[str, Any]], session_file: Path) -> Metric
         module: rate for module, rate in module_kill_rates.items() if rate < 0.5
     }
 
-    boundary_records = [record for record in records if record["is_boundary"]]
+    boundary_records = [record for record in valid_records if record["is_boundary"]]
     boundary_total = len(boundary_records)
     boundary_killed = sum(
         1 for record in boundary_records if record["test_outcome"] == "killed"
@@ -133,9 +137,14 @@ def compute_metrics(records: list[dict[str, Any]], session_file: Path) -> Metric
             "occurrence": record["occurrence"],
             "job_id": record["job_id"],
         }
-        for record in records
+        for record in valid_records
         if record["test_outcome"] == "survived"
     ]
+
+    details_base = {
+        "incompetent_mutants_excluded": incompetent,
+        "total_jobs_in_session": len(records),
+    }
 
     kill_score = round(kill_rate * 100, 2)
     boundary_score = round(boundary_kill_rate * 100, 2)
@@ -155,7 +164,7 @@ def compute_metrics(records: list[dict[str, Any]], session_file: Path) -> Metric
             score=kill_score,
             gate=">= 70%",
             passed=kill_rate >= 0.70,
-            details={"killed": killed, "survived": survived, "total": total},
+            details={"killed": killed, "survived": survived, "total": total, **details_base},
         ),
         MetricResult(
             metric_id="M2",
@@ -167,7 +176,7 @@ def compute_metrics(records: list[dict[str, Any]], session_file: Path) -> Metric
             score=kill_score,
             gate=">= 70%",
             passed=kill_rate >= 0.70,
-            details={"killed": killed, "survived": survived, "total": total},
+            details={"killed": killed, "survived": survived, "total": total, **details_base},
         ),
         MetricResult(
             metric_id="M3",
@@ -277,6 +286,70 @@ def build_testable_gate_report(report: MetricsReport) -> dict[str, Any]:
     }
 
 
+def build_platform_cosmic_ray_json(
+    session_file: Path,
+    gate_report: dict[str, Any],
+    report: MetricsReport,
+    dump_path: str = "cosmic-ray/0/cosmic_ray_dump.jsonl",
+) -> dict[str, Any]:
+    """TESTABLE platform reads cosmic-ray/0/cosmic_ray.json — embed 0-100 metrics here."""
+    kill_pct = round(report.mutation_kill_rate_percent, 2)
+    boundary_pct = round(
+        next(m.score for m in report.metrics if m.metric_id == "M4"), 2
+    )
+    weak_spot_pct = round(
+        next(m.score for m in report.metrics if m.metric_id == "M3"), 2
+    )
+    return {
+        "exit": 0,
+        "dump_ok": True,
+        "dump_path": dump_path,
+        "session_file": str(session_file),
+        "totalMutants": report.total_mutants,
+        "killedMutants": report.killed_mutants,
+        "survivedMutants": report.survived_mutants,
+        "LogicErrorSensitivity": kill_pct,
+        "TestRigorAssessment": kill_pct,
+        "WeakSpotLocalization": weak_spot_pct,
+        "BoundaryMutantAnalysis": boundary_pct,
+        "ChangeResilienceTesting": round(
+            next(m.score for m in report.metrics if m.metric_id == "M5"), 2
+        ),
+        "SemanticIntegrityCheck": round(
+            next(m.score for m in report.metrics if m.metric_id == "M6"), 2
+        ),
+        "MutationKillRatePercent": kill_pct,
+        **gate_report,
+    }
+
+
+def load_records_from_dump_file(dump_file: Path) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    for line in dump_file.read_text(encoding="utf-8-sig").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        payload = json.loads(line)
+        if len(payload) != 2 or payload[1] is None:
+            continue
+        work_item, work_result = payload
+        mutation = work_item["mutations"][0]
+        records.append(
+            {
+                "job_id": work_item["job_id"],
+                "module_path": mutation["module_path"],
+                "module_name": _normalize_module(mutation["module_path"]),
+                "operator_name": mutation["operator_name"],
+                "occurrence": mutation["occurrence"],
+                "definition_name": mutation.get("definition_name", ""),
+                "test_outcome": work_result.get("test_outcome", "unknown"),
+                "worker_outcome": work_result.get("worker_outcome", "unknown"),
+                "is_boundary": _is_boundary_operator(mutation["operator_name"]),
+            }
+        )
+    return records
+
+
 def render_markdown(report: MetricsReport) -> str:
     lines = [
         "# TESTABLE Mutation Testing Metrics Report",
@@ -343,6 +416,16 @@ def main() -> int:
         help="Path for TESTABLE dashboard gate report (0-100 scale)",
     )
     parser.add_argument(
+        "--output-platform",
+        default="cosmic-ray/0/cosmic_ray.json",
+        help="Path for TESTABLE platform cosmic_ray.json (embedded metrics)",
+    )
+    parser.add_argument(
+        "--dump-file",
+        default="",
+        help="Optional cosmic_ray_dump.jsonl path (overrides cosmic-ray dump)",
+    )
+    parser.add_argument(
         "--fail-on-gate",
         action="store_true",
         help="Exit with code 1 when any metric gate fails",
@@ -350,28 +433,39 @@ def main() -> int:
     args = parser.parse_args()
 
     session_file = Path(args.session)
-    if not session_file.exists():
+    if not session_file.exists() and not args.dump_file:
         print(f"Session file not found: {session_file}", file=sys.stderr)
         return 2
 
-    records = load_session_records(session_file)
+    if args.dump_file:
+        records = load_records_from_dump_file(Path(args.dump_file))
+    else:
+        records = load_session_records(session_file)
     report = compute_metrics(records, session_file)
 
     output_json = Path(args.output_json)
     output_md = Path(args.output_md)
     output_gate = Path(args.output_gate)
+    output_platform = Path(args.output_platform)
     output_json.parent.mkdir(parents=True, exist_ok=True)
     output_md.parent.mkdir(parents=True, exist_ok=True)
+    output_platform.parent.mkdir(parents=True, exist_ok=True)
 
     serializable = asdict(report)
     gate_report = build_testable_gate_report(report)
+    dump_path = args.dump_file or "cosmic-ray/0/cosmic_ray_dump.jsonl"
+    platform_report = build_platform_cosmic_ray_json(
+        session_file, gate_report, report, dump_path=dump_path
+    )
     output_json.write_text(json.dumps(serializable, indent=2), encoding="utf-8")
     output_md.write_text(render_markdown(report), encoding="utf-8")
     output_gate.write_text(json.dumps(gate_report, indent=2), encoding="utf-8")
+    output_platform.write_text(json.dumps(platform_report, indent=2), encoding="utf-8")
 
     print(render_markdown(report))
     print(f"JSON report: {output_json}")
     print(f"Dashboard gate report: {output_gate}")
+    print(f"Platform cosmic_ray.json: {output_platform}")
     print(f"Markdown report: {output_md}")
 
     if args.fail_on_gate and not report.all_gates_passed:

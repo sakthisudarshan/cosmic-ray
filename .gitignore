@@ -12,6 +12,7 @@ venv/
 # Cosmic Ray
 session.sqlite
 *.sqlite
+cosmic-ray/0/
 
 # Reports (generated artifacts; JSON/MD are uploaded in CI)
 reports/

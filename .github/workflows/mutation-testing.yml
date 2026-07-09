@@ -38,8 +38,13 @@ jobs:
       - name: Execute mutations
         run: cosmic-ray exec cosmic-ray.toml session.sqlite
 
+      - name: Export cosmic-ray dump for TESTABLE platform
+        run: |
+          mkdir -p cosmic-ray/0
+          cosmic-ray dump session.sqlite > cosmic-ray/0/cosmic_ray_dump.jsonl
+
       - name: Generate TESTABLE metrics report
-        run: python scripts/metrics_reporter.py --session session.sqlite --fail-on-gate
+        run: python scripts/export_testable_cosmic_ray.py --fail-on-gate
 
       - name: Upload metrics artifacts
         if: always()
@@ -50,6 +55,8 @@ jobs:
             reports/metrics-report.json
             reports/metrics-report.md
             reports/mutation-score-gate.json
+            cosmic-ray/0/cosmic_ray.json
+            cosmic-ray/0/cosmic_ray_dump.jsonl
           retention-days: 30
 
       - name: Print summary

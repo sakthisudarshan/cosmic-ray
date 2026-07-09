@@ -17,10 +17,20 @@ class TestClamp:
         assert clamp(0, 0, 10) == 0
         assert clamp(10, 0, 10) == 10
 
+    def test_fractional_within_range(self):
+        assert clamp(5.5, 5, 10) == 5.5
+
+    def test_negative_minimum_boundary(self):
+        assert clamp(-10, -5, 0) == -5
+        assert clamp(-3, -5, 0) == -3
+
 
 class TestSafeDivide:
     def test_normal_division(self):
         assert safe_divide(10, 2) == 5.0
+
+    def test_non_integer_quotient(self):
+        assert safe_divide(5, 2) == 2.5
 
     def test_zero_denominator(self):
         assert safe_divide(10, 0) == 0.0
